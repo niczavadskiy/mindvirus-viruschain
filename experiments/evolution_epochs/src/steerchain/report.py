@@ -125,11 +125,17 @@ def _plot_by_epoch(path: Path, grouped, ideologies: list[str], field: str, title
         axis.set_title(ideology)
         axis.set_xlabel("epoch")
         axis.set_ylabel(field)
-        axis.legend(fontsize=8)
+        _legend_if_labeled(axis)
     fig.suptitle(title)
     fig.tight_layout()
     fig.savefig(path, dpi=120)
     plt.close(fig)
+
+
+def _legend_if_labeled(axis) -> None:
+    handles, labels = axis.get_legend_handles_labels()
+    if handles:
+        axis.legend(handles, labels, fontsize=8)
 
 
 def _plot_transitions(path: Path, rows: list[dict], ideologies: list[str]) -> None:
@@ -152,7 +158,7 @@ def _plot_transitions(path: Path, rows: list[dict], ideologies: list[str]) -> No
         axis.set_title(ideology)
         axis.set_xlabel("target hop")
         axis.set_ylabel("transition success")
-        axis.legend(fontsize=8)
+        _legend_if_labeled(axis)
     fig.suptitle(f"Transition success at epoch {last_epoch}")
     fig.tight_layout()
     fig.savefig(path, dpi=120)

@@ -1,0 +1,26 @@
+# HF smoke environment for Qwen/Qwen3.5-2B-Base (+ BGE via transformers).
+# Config: configs/smoke_hf_mini.yaml (reduced) or configs/smoke_hf.yaml (full).
+# Fallback host without qwen3_5: configs/smoke_hf_mini_qwen25.yaml
+#
+# Python: >=3.10
+#
+# REQUIRED:
+numpy>=1.24,<2
+torch>=2.5.0
+transformers>=4.54.0
+accelerate>=0.33.0
+# transformers 5.x wants hub 1.x (has ResolvedRevision). Hub may pull httpx2;
+# steerchain.hub_patch routes downloads through requests to avoid the decoder crash.
+huggingface_hub>=1.5,<2
+requests>=2.31
+pyyaml>=6.0
+matplotlib>=3.7
+#
+# DO NOT install (break AutoModel / BGE when mismatched with torch):
+#   torchaudio
+#   torchvision
+#   sentence-transformers
+#   httpx2
+#
+# If already present and broken:
+#   pip uninstall -y torchaudio torchvision sentence-transformers httpx2

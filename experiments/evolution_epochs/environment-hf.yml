@@ -1,0 +1,21 @@
+# Conda env for the known-good HF mini smoke.
+#   conda env create -f environment-hf.yml
+#   conda activate steerchain-hf
+#   pip uninstall -y torchaudio torchvision sentence-transformers || true
+#   pip install -e .
+#   python -m steerchain --config configs/smoke_hf_mini.yaml
+
+name: steerchain-hf
+channels:
+  - pytorch
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - numpy>=1.24,<2
+  - pyyaml
+  - matplotlib
+  - pip:
+      - torch>=2.2.0
+      - transformers>=4.44.0
+      - -e .

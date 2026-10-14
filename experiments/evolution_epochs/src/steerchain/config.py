@@ -55,6 +55,9 @@ class ExperimentConfig:
     agents_per_hop: int = 20
     turns_per_hop: int = 10
     max_tool_loops: int = 2
+    require_tool_action: bool = True
+    tool_retries: int = 1
+    native_tools: bool = True
     n_epochs: int = 2
     seeds: list[int] = field(default_factory=lambda: [0])
     n_seed_agents: int = 1
@@ -74,6 +77,8 @@ class ExperimentConfig:
     run_probes: bool = True
     data_dir: str | None = None
     run_dir: str = "runs/smoke"
+    # Prefer env HF_TOKEN / repo .env; optional explicit override (do not commit secrets).
+    hf_token: str | None = None
     sae: SAEConfig = field(default_factory=SAEConfig)
 
     def resolved_data_dir(self) -> Path:

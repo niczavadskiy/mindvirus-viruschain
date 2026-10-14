@@ -6,11 +6,19 @@ build-backend = "setuptools.build_meta"
 name = "steerchain"
 version = "0.1.0"
 description = "Hidden-state steering of idea propagation on a mind-virus hop chain."
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = ["numpy", "pyyaml", "matplotlib"]
 
 [project.optional-dependencies]
-hf = ["torch", "transformers", "sentence-transformers"]
+# Matches requirements-hf.txt (known-good mini smoke). No torchaudio/torchvision/ST.
+hf = [
+    "numpy>=1.24,<2",
+    "torch>=2.5.0",
+    "transformers>=4.54.0",
+    "accelerate>=0.33.0",
+    "huggingface_hub>=1.5,<2",
+    "requests>=2.31",
+]
 
 [project.scripts]
 steerchain = "steerchain.__main__:main"

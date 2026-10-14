@@ -312,20 +312,33 @@ def lock_tau(ideology: Ideology, default_soul: str, embedder) -> float:
     return choose_tau(positive_scores, negative_scores)
 
 
-def build_detector(config, ideologies: list[Ideology], default_soul: str) -> Detector:
+def build_detector(
+    config,
+    ideologies: list[Ideology],
+    default_soul: str,
+    *,
+    complete_fn=None,
+) -> Detector:
+    """Build the detector. Pass complete_fn to reuse the host HF model for judge/probes."""
     embedder = build_embedder(config.embedder, config.embedding_model_id)
     judge: OverlapJudge | LLMJudge
     probe_judge: OverlapProbeJudge | LLMProbeJudge
-    if config.backend == "hf" and config.embedder == "sentence_transformer":
-        from steerchain.backend import HFBackend
+    use_llm_judge = complete_fn is not None or (
+        config.backend == "hf"
+        and config.embedder in ("sentence_transformer", "transformers")
+    )
+    if use_llm_judge:
+        if complete_fn is None:
+            from steerchain.backend import HFBackend
 
-        judge_backend = HFBackend(
-            config.resolved_judge_model(),
-            layer_k=config.transformer_layer_k,
-            max_new_tokens=128,
-        )
-        judge = LLMJudge(judge_backend.complete)
-        probe_judge = LLMProbeJudge(judge_backend.complete)
+            judge_backend = HFBackend(
+                config.resolved_judge_model(),
+                layer_k=config.transformer_layer_k,
+                max_new_tokens=128,
+            )
+            complete_fn = judge_backend.complete
+        judge = LLMJudge(complete_fn)
+        probe_judge = LLMProbeJudge(complete_fn)
     else:
         judge = OverlapJudge()
         probe_judge = OverlapProbeJudge()

@@ -43,7 +43,7 @@ def _tiny(**overrides) -> ExperimentConfig:
 
 
 def test_chain_extracts_hop9_to_hop10_and_steers_only_hop0(tmp_path: Path):
-    rows = run_experiment(_tiny(), run_dir=tmp_path)
+    rows = run_experiment(_tiny(), run_dir=tmp_path, stamp_run=False)
     by_condition = {}
     for row in rows:
         by_condition.setdefault(row["condition"], []).append(row)
@@ -136,8 +136,8 @@ def test_cumulative_norm_grows_and_rerun_matches(tmp_path: Path):
     config = _tiny(conditions=["C"], n_epochs=3, agents_per_hop=1, turns_per_hop=1)
     first = tmp_path / "first"
     second = tmp_path / "second"
-    run_experiment(config, run_dir=first)
-    run_experiment(config, run_dir=second)
+    run_experiment(config, run_dir=first, stamp_run=False)
+    run_experiment(config, run_dir=second, stamp_run=False)
     delta0 = np.load(first / "whale_welfare" / "C" / "seed_0" / "steering" / "epoch_0_delta.npy")
     delta1 = np.load(first / "whale_welfare" / "C" / "seed_0" / "steering" / "epoch_1_delta.npy")
     cumulative = np.load(first / "whale_welfare" / "C" / "seed_0" / "steering" / "epoch_1_cumulative.npy")

@@ -148,12 +148,38 @@ def test_smoke_config_uses_the_paper_topology():
     assert config.pair_spreader_hop == 9
     assert config.pair_target_hop == 10
     assert config.model_id == "Qwen/Qwen3.5-2B-Base"
+    assert config.backend == "stub"
     assert config.sae.repo_id == "Qwen/SAE-Res-Qwen3.5-2B-Base-W32K-L0_100"
     assert config.sae.architecture == "topk"
     assert config.sae.enabled is False
     assert config.transformer_layer_k is None
     assert config.layer_select_mode == "max_delta"
     assert config.sae.transformer_layer_k == 12
+
+
+def test_smoke_hf_config_is_real_dialogue_topology():
+    config = load_config(repo_root() / "configs" / "smoke_hf.yaml")
+    assert config.backend == "hf"
+    assert config.embedder == "transformers"
+    assert config.model_id == "Qwen/Qwen3.5-2B-Base"
+    assert config.n_hops == 10
+    assert config.agents_per_hop == 20
+    assert config.turns_per_hop == 10
+    assert config.n_epochs == 2
+    assert config.pair_spreader_hop == 9
+    assert config.pair_target_hop == 10
+    assert config.transformer_layer_k is None
+    assert config.layer_select_mode == "max_delta"
+    assert config.run_probes is True
+    assert config.conditions == ["A", "B", "C", "D"]
+    mini = load_config(repo_root() / "configs" / "smoke_hf_mini.yaml")
+    assert mini.backend == "hf"
+    assert mini.embedder == "transformers"
+    assert mini.model_id == "Qwen/Qwen3.5-2B-Base"
+    assert mini.agents_per_hop == 2
+    assert mini.turns_per_hop == 2
+    assert mini.n_hops == 10
+    assert mini.pair_target_hop == 10
 
 
 def test_layer_resolver_rejects_unknown_families_and_hooks_one_layer():

@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 
+# qwen3_5 startswith "qwen3"; keep prefixes coarse on purpose.
 _KNOWN_PREFIXES = ("llama", "qwen2", "qwen3", "gemma2")
 
 
@@ -14,7 +15,7 @@ def resolve_layers(model: Any) -> Any:
     if not isinstance(model_type, str) or not model_type.startswith(_KNOWN_PREFIXES):
         raise ValueError(
             f"Unsupported model_type {model_type!r}. "
-            "Expected a llama, qwen2, qwen3, or gemma2 checkpoint."
+            "Expected a llama, qwen2, qwen3/qwen3_5, or gemma2 checkpoint."
         )
     parent = getattr(model, "model", None)
     layers = getattr(parent, "layers", None)

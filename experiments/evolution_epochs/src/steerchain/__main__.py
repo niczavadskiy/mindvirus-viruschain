@@ -14,12 +14,20 @@ def main() -> None:
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--run-dir", type=Path, default=None)
     parser.add_argument(
+        "--no-stamp",
+        action="store_true",
+        help="Write directly into --run-dir / config.run_dir without a YYYYMMDD_HHMMSS subfolder.",
+    )
+    parser.add_argument(
         "--sae-only",
         action="store_true",
         help="Skip simulation; run SAE analysis on an existing --run-dir.",
     )
     args = parser.parse_args()
     config = load_config(args.config)
+    from steerchain.hf_auth import apply_hf_token
+
+    apply_hf_token(config)
     if args.sae_only:
         if args.run_dir is None:
             raise SystemExit("--sae-only requires --run-dir")
@@ -29,7 +37,7 @@ def main() -> None:
         summary = run_sae_analysis(run_dir=args.run_dir, config=config)
         print(f"sae status={summary.get('status')}")
         return
-    rows = run_experiment(config, run_dir=args.run_dir)
+    rows = run_experiment(config, run_dir=args.run_dir, stamp_run=not args.no_stamp)
     print(f"wrote {len(rows)} epoch rows")
 
 

@@ -61,9 +61,49 @@ class SentenceTransformerEmbedder:
         return np.asarray(vector, dtype=np.float64)
 
 
-def build_embedder(kind: str, model_id: str) -> LexicalEmbedder | SentenceTransformerEmbedder:
+class TransformersEmbedder:
+    """BGE / HF encoder via mean pooling. Avoids the sentence-transformers dependency."""
+
+    def __init__(self, model_id: str) -> None:
+        import torch
+        from transformers import AutoModel, AutoTokenizer
+
+        self.torch = torch
+        self.tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+        self.model = AutoModel.from_pretrained(model_id, trust_remote_code=True)
+        self.model.eval()
+
+    def embed(self, text: str) -> np.ndarray:
+        torch = self.torch
+        inputs = self.tokenizer(
+            text,
+            return_tensors="pt",
+            truncation=True,
+            max_length=512,
+            padding=True,
+        )
+        with torch.no_grad():
+            hidden = self.model(**inputs).last_hidden_state
+            mask = inputs["attention_mask"].unsqueeze(-1).to(hidden.dtype)
+            summed = (hidden * mask).sum(dim=1)
+            counts = mask.sum(dim=1).clamp(min=1.0)
+            vector = (summed / counts)[0].float().cpu().numpy()
+        vector = np.asarray(vector, dtype=np.float64)
+        norm = float(np.linalg.norm(vector))
+        if norm == 0.0:
+            return vector
+        return vector / norm
+
+
+def build_embedder(
+    kind: str,
+    model_id: str,
+) -> LexicalEmbedder | SentenceTransformerEmbedder | TransformersEmbedder:
     if kind == "lexical":
         return LexicalEmbedder()
-    if kind == "sentence_transformer":
-        return SentenceTransformerEmbedder(model_id)
-    raise ValueError(f"Unknown embedder {kind!r}. Expected lexical or sentence_transformer.")
+    if kind in ("transformers", "sentence_transformer"):
+        # Prefer HF mean-pool; sentence_transformers pulls torchvision and breaks mismatched envs.
+        return TransformersEmbedder(model_id)
+    raise ValueError(
+        f"Unknown embedder {kind!r}. Expected lexical, sentence_transformer, or transformers."
+    )

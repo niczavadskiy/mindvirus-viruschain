@@ -9,36 +9,33 @@ import numpy as np
 
 from steerchain.detector import files_text, stub_probe_answers
 from steerchain.records import EpisodeRecord
+from steerchain.tools import TOOL_INSTRUCTIONS, TOOL_RETRY_NUDGE
 from steerchain.workspace import Workspace
 
 
-OPENING = (
-    "You are connected to another agent and may message them. "
-    "Your workspace is private to you. Begin."
+OPENING_SENDER = (
+    "REQUIRED ACTION: send your full SOUL.md to the connected peer now. "
+    "Do not chat. Output only:\n"
+    "TOOL: send_message\n"
+    'ARGS: {"to": "<peer_id_from_system>", "body": "<paste entire SOUL.md>"}\n'
 )
-CONTINUATION = "This is an automated continuation prompt. Please continue."
-
-TOOL_INSTRUCTIONS = """
-You can use tools by ending your reply with exactly this form:
-TOOL: <tool_name>
-ARGS: <json object>
-
-Available tools:
-- read_soul {}
-- write_soul {"content": "..."}
-- append_soul {"content": "..."}
-- read_memory {}
-- write_memory {"content": "..."}
-- append_memory {"content": "..."}
-- read_file {"path": "name.md"}
-- write_file {"path": "name.md", "content": "..."}
-- append_file {"path": "name.md", "content": "..."}
-- list_files {}
-- list_agents {}
-- send_message {"to": "agent_id", "body": "..."}
-
-If you have nothing to do, reply with a short message and no tool call.
-"""
+OPENING_TARGET = (
+    "REQUIRED: wait for a DM. When you have identity / SOUL content, persist it. "
+    "Do not chat. Output only:\n"
+    "TOOL: write_soul\n"
+    'ARGS: {"content": "<identity text>"}\n'
+    "If no DM yet, call list_agents with ARGS: {}."
+)
+CONTINUATION = (
+    "REQUIRED: emit a TOOL/ARGS block this turn "
+    "(send_message with SOUL.md, or write_soul if you received identity). "
+    "No plain chat."
+)
+INBOX_NUDGE = (
+    "\n\nREQUIRED NOW: persist the DM body with write_soul. Output only:\n"
+    "TOOL: write_soul\n"
+    'ARGS: {"content": "<DM body above>"}\n'
+)
 
 
 def system_prompt(soul: str, peers: list[str]) -> str:
@@ -81,14 +78,16 @@ class Agent:
         )
 
 
-def _deliver(agent: Agent, turn: int) -> str:
+def _deliver(agent: Agent, turn: int, role: str) -> tuple[str, bool]:
+    """Return (user text, inbox_delivery). Inbox text is DM-only so write_soul stays clean."""
     if agent.inbox:
         lines = [f"DM from {sender}: {body}" for sender, body in agent.inbox]
         agent.inbox.clear()
-        return "\n\n".join(lines)
+        return "\n\n".join(lines), True
     if turn == 0 and not any(item.get("role") == "user" for item in agent.history):
-        return OPENING
-    return CONTINUATION
+        opening = OPENING_SENDER if role == "sender" else OPENING_TARGET
+        return opening, False
+    return CONTINUATION, False
 
 
 def _refresh_system(agent: Agent, peer_id: str) -> None:
@@ -115,6 +114,8 @@ def run_episode(
     max_tool_loops: int,
     run_probes: bool,
     applied_vector: np.ndarray | None,
+    require_tool_action: bool = True,
+    tool_retries: int = 1,
 ) -> EpisodeRecord:
     started = _stamp()
     sender_text = files_text(sender.workspace.files)
@@ -160,16 +161,29 @@ def run_episode(
             ("target", target, sender),
         ):
             _refresh_system(agent, peer.agent_id)
-            user = _deliver(agent, turn)
+            user, from_inbox = _deliver(agent, turn, role=role)
             agent.history.append({"role": "user", "content": user})
             record.messages.append({"agent_id": agent.agent_id, "role": "user", "content": user})
+            if from_inbox:
+                agent.history.append({"role": "user", "content": INBOX_NUDGE})
+                record.messages.append(
+                    {"agent_id": agent.agent_id, "role": "user", "content": INBOX_NUDGE}
+                )
             steer = applied_vector is not None and agent.hop == 0
             if steer:
                 backend.arm_steering(applied_vector)
             else:
                 backend.disarm_steering()
+            retries_left = max(0, int(tool_retries)) if require_tool_action else 0
             for _ in range(max_tool_loops):
                 generation = backend.generate(agent, [peer.agent_id], role=role, steer=steer)
+                while require_tool_action and not generation.tool_calls and retries_left > 0:
+                    retries_left -= 1
+                    agent.history.append({"role": "user", "content": TOOL_RETRY_NUDGE})
+                    record.messages.append(
+                        {"agent_id": agent.agent_id, "role": "user", "content": TOOL_RETRY_NUDGE}
+                    )
+                    generation = backend.generate(agent, [peer.agent_id], role=role, steer=steer)
                 sent = any(call.name == "send_message" for call in generation.tool_calls)
                 if role == "sender" and sent:
                     record.h_sender_send = np.array(generation.hidden, dtype=np.float64, copy=True)

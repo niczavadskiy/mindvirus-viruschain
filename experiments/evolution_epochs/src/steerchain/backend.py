@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 
 import numpy as np
 
 from steerchain.injector import add_vector, layer_index, resolve_layers
+from steerchain.tools import TOOL_SCHEMAS, parse_tool_calls
 from steerchain.workspace import ToolCall
 
 
@@ -18,25 +18,6 @@ class Generation:
     tool_calls: list[ToolCall]
     hidden: np.ndarray
     transformer_layer_k: int
-
-
-_TOOL_RE = re.compile(
-    r"TOOL:\s*([A-Za-z_]+)\s*ARGS:\s*(\{.*\})",
-    re.DOTALL,
-)
-
-
-def parse_tool_calls(text: str) -> list[ToolCall]:
-    match = _TOOL_RE.search(text)
-    if match is None:
-        return []
-    try:
-        arguments = json.loads(match.group(2))
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(arguments, dict):
-        return []
-    return [ToolCall(name=match.group(1), arguments=arguments)]
 
 
 class StubBackend:
@@ -159,18 +140,44 @@ class HFBackend:
 
     local_probes = False
 
-    def __init__(self, model_id: str, layer_k: int | None = None, max_new_tokens: int = 256) -> None:
+    def __init__(
+        self,
+        model_id: str,
+        layer_k: int | None = None,
+        max_new_tokens: int = 256,
+        native_tools: bool = True,
+    ) -> None:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         self.torch = torch
         self.model_id = model_id
         self.max_new_tokens = max_new_tokens
-        self.tokenizer = AutoTokenizer.from_pretrained(model_id)
+        self.native_tools = native_tools
+        self.tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+        try:
+            from steerchain.hub_patch import prepare_hub_downloads
+
+            prepare_hub_downloads()
+        except Exception:
+            pass
         dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-        self.model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=dtype, device_map="auto")
+        # Qwen3.5 (model_type qwen3_5) needs a recent transformers + torch>=2.5.
+        # On CPU avoid device_map="auto" — it can offload weights to disk and crawl.
+        load_kwargs: dict = {"dtype": dtype, "trust_remote_code": True}
+        if torch.cuda.is_available():
+            load_kwargs["device_map"] = "auto"
+        try:
+            self.model = AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs)
+        except TypeError:
+            # Older transformers only accept torch_dtype=
+            load_kwargs.pop("dtype", None)
+            load_kwargs["torch_dtype"] = dtype
+            self.model = AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs)
+        if not torch.cuda.is_available():
+            self.model.to("cpu")
         self.model.eval()
         self.layers = resolve_layers(self.model)
         self.n_layers = len(self.layers)
@@ -251,11 +258,36 @@ class HFBackend:
             plain.append({"role": role, "content": item.get("content", "")})
         return plain
 
+    def _render_prompt(self, messages: list[dict]) -> str:
+        if getattr(self.tokenizer, "chat_template", None):
+            kwargs = {"tokenize": False, "add_generation_prompt": True}
+            if self.native_tools:
+                try:
+                    return self.tokenizer.apply_chat_template(
+                        messages,
+                        tools=TOOL_SCHEMAS,
+                        **kwargs,
+                    )
+                except TypeError:
+                    pass
+                except Exception:
+                    pass
+            try:
+                return self.tokenizer.apply_chat_template(messages, **kwargs)
+            except Exception:
+                pass
+        parts = []
+        for item in messages:
+            parts.append(f"{item.get('role', 'user').upper()}:\n{item.get('content', '')}")
+        parts.append("ASSISTANT:\n")
+        return "\n\n".join(parts)
+
     def _generate_text(self, messages: list[dict], armed: bool) -> str:
         torch = self.torch
-        prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        prompt = self._render_prompt(messages)
         inputs = self.tokenizer(prompt, return_tensors="pt")
-        inputs = {key: value.to(self.model.device) for key, value in inputs.items()}
+        device = next(self.model.parameters()).device
+        inputs = {key: value.to(device) for key, value in inputs.items()}
         self._last_hidden = np.zeros((self.n_layers, self.hidden_size), dtype=np.float64)
         handles = [
             layer.register_forward_hook(self._make_hook(index, armed and index == self.transformer_layer_k))
@@ -304,5 +336,6 @@ def build_backend(config, default_soul: str):
             config.model_id,
             layer_k=config.transformer_layer_k,
             max_new_tokens=config.max_new_tokens,
+            native_tools=bool(getattr(config, "native_tools", True)),
         )
     raise ValueError(f"Unknown backend {config.backend!r}. Expected stub or hf.")

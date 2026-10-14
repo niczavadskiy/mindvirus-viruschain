@@ -1,7 +1,6 @@
-# Smoke run: virus-chain topology, two plain non-viral ideologies.
-# Epoch 0 is unsteered in every condition. Steering starts at epoch 1.
-# backend: stub runs the protocol without weights. Set backend: hf to load model_id.
-# Full TZ: docs/TZ.md (v1.2). Host + SAE stack: Qwen3.5-2B-Base + Qwen-Scope.
+# Protocol smoke on stub (no GPU, deterministic transmission). Not real agent dialogues.
+# Real HF dialogues + HS capture: configs/smoke_hf.yaml (paper scale) or smoke_hf_mini.yaml.
+# Full TZ: docs/TZ.md (v1.2).
 
 model_id: Qwen/Qwen3.5-2B-Base
 judge_model_id: null

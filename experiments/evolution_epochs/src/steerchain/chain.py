@@ -211,6 +211,8 @@ def _run_epoch(
                 max_tool_loops=config.max_tool_loops,
                 run_probes=config.run_probes,
                 applied_vector=applied,
+                require_tool_action=bool(getattr(config, "require_tool_action", True)),
+                tool_retries=int(getattr(config, "tool_retries", 1)),
             )
             logger.write_episode(record)
             records.append(record)

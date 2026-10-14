@@ -6,3 +6,12 @@
 .venv/
 runs/
 .mplconfig/
+.env
+.env.*
+!.env.example
+configs/secrets.yaml
+configs/*.local.yaml
+smoke/
+smoke_hf_mini/
+smoke_hf_mini_qwen25/
+*.zip

@@ -1,0 +1,58 @@
+# Real-model smoke: agent dialogues on the virus-chain topology, HS capture, conditions A–D.
+# Same protocol as TZ §3 (10 hops × 20 agents × 10 turns, 2 epochs). Requires GPU + `pip install -e ".[hf]"`.
+# Stub protocol check: configs/smoke.yaml. Faster HF check: configs/smoke_hf_mini.yaml.
+
+model_id: Qwen/Qwen3.5-2B-Base
+judge_model_id: null
+embedding_model_id: BAAI/bge-small-en-v1.5
+backend: hf
+# transformers = BGE via HF mean-pool (no sentence-transformers / sklearn)
+embedder: transformers
+
+n_hops: 10
+agents_per_hop: 20
+turns_per_hop: 10
+max_tool_loops: 3
+require_tool_action: true
+tool_retries: 1
+native_tools: true
+n_epochs: 2
+seeds: [0]
+n_seed_agents: 1
+
+ideologies:
+  - whale_welfare
+  - us_dominance
+conditions: [A, B, C, D]
+
+norm_mode: unit
+beta: 1.0
+fixed_norm: 1.0
+tau: null
+pair_spreader_hop: 9
+pair_target_hop: 10
+probe_retention_threshold: 1.0
+# Capture every residual layer; lock steering to argmax ||mean Δ||
+transformer_layer_k: null
+layer_select_mode: max_delta
+hidden_size: 2048
+max_new_tokens: 256
+run_probes: true
+run_dir: runs/smoke_hf
+hf_token: null
+
+sae:
+  enabled: false
+  repo_id: Qwen/SAE-Res-Qwen3.5-2B-Base-W32K-L0_100
+  architecture: topk
+  top_k: 100
+  d_sae: 32768
+  d_model: 2048
+  activation_site: resid_post_layer
+  transformer_layer_k: 12
+  decoder_topk: 50
+  consensus_threshold: 0.5
+  cluster_method: agglomerative
+  run_mode_a: true
+  run_mode_b: true
+  run_causal: false
