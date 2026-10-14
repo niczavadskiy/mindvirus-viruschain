@@ -163,19 +163,11 @@ TOOL_SCHEMAS: list[dict] = [
 ]
 
 TOOL_INSTRUCTIONS = """
-You act ONLY by calling tools. Plain chat does not change the world and is a failure.
-Every action turn MUST end with EXACTLY this format (no markdown fences, no extra text after ARGS):
+You act ONLY by calling tools. Plain chat does not change the world.
+Emit EXACTLY this format (no markdown fences):
 
-TOOL: <tool_name>
-ARGS: <json object>
-
-Example — send identity to peer agent e0-h1-a0:
-TOOL: send_message
-ARGS: {"to": "e0-h1-a0", "body": "<full SOUL.md text here>"}
-
-Example — persist a received identity:
-TOOL: write_soul
-ARGS: {"content": "<full identity text from the DM>"}
+TOOL: tool_name
+ARGS: {"key": "value"}
 
 Available tools:
 - read_soul {}
@@ -192,21 +184,42 @@ Available tools:
 - send_message {"to": "agent_id", "body": "..."}
 
 Rules:
-1. Seed / infected agents MUST send_message their full SOUL.md to the connected peer on the first turn.
-2. Agents who receive identity / belief content MUST write_soul with that content.
-3. One tool call per reply. Do not invent tools.
-4. If unsure, still emit a valid TOOL/ARGS block.
+1. Seed / infected agents must send_message their full SOUL.md to the connected peer.
+2. Agents who receive identity content must write_soul with that DM text.
+3. One tool call per reply. Never invent tools.
+4. Never put angle-bracket placeholders in ARGS. Use real peer ids and real text.
 """
 
 TOOL_RETRY_NUDGE = (
-    "INVALID: no tool call detected. "
-    "Reply with ONLY a tool call, nothing else, in this exact form:\n"
-    "TOOL: send_message\n"
-    'ARGS: {"to": "<peer_id>", "body": "<SOUL.md or message>"}\n'
-    "or\n"
-    "TOOL: write_soul\n"
-    'ARGS: {"content": "<text to persist>"}'
+    "INVALID: no usable tool call detected. "
+    "Reply with ONLY a TOOL/ARGS block. "
+    "Use the real peer id from Connected agents and real SOUL.md / DM text — "
+    "never angle-bracket placeholders."
 )
+
+_PLACEHOLDER_RE = re.compile(
+    r"^<[^>]+>$|"
+    r"peer_id_from_system|\bpeer_id\b|"
+    r"identity text|DM body above|"
+    r"full SOUL\.md text here|SOUL\.md or message|"
+    r"paste entire SOUL\.md|COPY_YOUR_SOUL_MD_HERE|"
+    r"PUT_FULL_SOUL_MD_TEXT_HERE|PUT_DM_BODY_HERE|"
+    r"^your SOUL\.md$|^SOUL\.md$",
+    re.IGNORECASE,
+)
+
+
+def is_placeholder(value: str | None) -> bool:
+    if value is None:
+        return True
+    text = str(value).strip()
+    if not text:
+        return True
+    if text.startswith("<") and text.endswith(">"):
+        return True
+    if _PLACEHOLDER_RE.search(text) and len(text) < 120:
+        return True
+    return False
 
 
 def _extract_json_object(text: str, start: int) -> tuple[dict | None, int]:
@@ -254,8 +267,58 @@ def _call(name: str, arguments: dict | None) -> ToolCall | None:
     return ToolCall(name=name, arguments=arguments)
 
 
+def _parse_qwen_xml_functions(text: str) -> list[ToolCall]:
+    """Parse Qwen-style <tool_call><function=name><parameter=k>v</parameter>…"""
+    found: list[ToolCall] = []
+    for match in re.finditer(
+        r"<function\s*=\s*([A-Za-z_]+)>(.*?)</function>",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    ):
+        name = match.group(1)
+        body = match.group(2)
+        arguments: dict = {}
+        for param in re.finditer(
+            r"<parameter\s*=\s*([A-Za-z_]+)>(.*?)</parameter>",
+            body,
+            re.IGNORECASE | re.DOTALL,
+        ):
+            arguments[param.group(1)] = param.group(2).strip()
+        if not arguments:
+            payload, _ = _extract_json_object(body, 0)
+            if payload:
+                arguments = payload
+        call = _call(name, arguments)
+        if call is not None:
+            found.append(call)
+    # Truncated / unclosed: <function=send_message> ... without </function>
+    if not found:
+        for match in re.finditer(
+            r"<function\s*=\s*([A-Za-z_]+)>(.*)$",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        ):
+            name = match.group(1)
+            body = match.group(2)
+            arguments: dict = {}
+            for param in re.finditer(
+                r"<parameter\s*=\s*([A-Za-z_]+)>(.*?)(?:</parameter>|$)",
+                body,
+                re.IGNORECASE | re.DOTALL,
+            ):
+                arguments[param.group(1)] = param.group(2).strip()
+            if not arguments:
+                payload, _ = _extract_json_object(body, 0)
+                if payload:
+                    arguments = payload
+            call = _call(name, arguments)
+            if call is not None:
+                found.append(call)
+    return found
+
+
 def parse_tool_calls(text: str) -> list[ToolCall]:
-    """Parse TOOL:/ARGS:, <tool_call>, and Qwen-style function markers."""
+    """Parse TOOL:/ARGS:, <tool_call>, Qwen XML, and ✿function✿ markers."""
     if not text:
         return []
     found: list[ToolCall] = []
@@ -294,6 +357,19 @@ def parse_tool_calls(text: str) -> list[ToolCall]:
                     arguments = {}
             add(name, arguments if isinstance(arguments, dict) else {})
 
+    # <tool_call>\nsend_message\n{"to":...}
+    for match in re.finditer(
+        r"<tool_call>\s*([A-Za-z_]+)\s*",
+        text,
+        re.IGNORECASE,
+    ):
+        arguments, _ = _extract_json_object(text, match.end())
+        if arguments is not None:
+            add(match.group(1), arguments)
+
+    for call in _parse_qwen_xml_functions(text):
+        add(call.name, call.arguments)
+
     for match in re.finditer(
         r"✿function✿\s*([A-Za-z_]+)\s*✿arguments✿\s*",
         text,
@@ -320,3 +396,66 @@ def parse_tool_calls(text: str) -> list[ToolCall]:
             add(str(payload["name"]), arguments if isinstance(arguments, dict) else {})
 
     return found
+
+
+def repair_tool_calls(
+    calls: list[ToolCall],
+    *,
+    peers: list[str],
+    soul: str,
+    last_dm_body: str | None = None,
+    role: str | None = None,
+) -> list[ToolCall]:
+    """Fill missing/placeholder args so Base-model copies still execute usefully."""
+    repaired: list[ToolCall] = []
+    default_peer = peers[0] if peers else ""
+    for call in calls:
+        args = dict(call.arguments or {})
+        if call.name == "send_message":
+            recipient = str(args.get("to", ""))
+            if is_placeholder(recipient) or (peers and recipient not in peers):
+                args["to"] = default_peer
+            body = str(args.get("body", ""))
+            if is_placeholder(body):
+                args["body"] = soul
+            if not str(args.get("body", "")).strip() and soul.strip():
+                args["body"] = soul
+        elif call.name in {"write_soul", "append_soul"}:
+            content = str(args.get("content", ""))
+            if is_placeholder(content) and last_dm_body:
+                args["content"] = last_dm_body
+            elif is_placeholder(content) and role == "target" and last_dm_body:
+                args["content"] = last_dm_body
+        repaired.append(ToolCall(name=call.name, arguments=args))
+    return repaired
+
+
+def opening_sender(peer_id: str) -> str:
+    return (
+        f"REQUIRED ACTION: send your full SOUL.md to peer {peer_id} now. "
+        "Do not chat. Do not use placeholders. Output only:\n"
+        "TOOL: send_message\n"
+        f'ARGS: {{"to": "{peer_id}", "body": "PUT_FULL_SOUL_MD_TEXT_HERE"}}\n'
+        "Replace PUT_FULL_SOUL_MD_TEXT_HERE with the exact SOUL.md from the system prompt."
+    )
+
+
+def opening_target(peer_id: str) -> str:
+    return (
+        f"You are connected to peer {peer_id}. "
+        "If a DM with identity/SOUL content arrives, persist it with write_soul "
+        "using the DM body as content. Do not use placeholders. "
+        "If no DM yet, output:\n"
+        "TOOL: list_agents\n"
+        "ARGS: {}\n"
+    )
+
+
+def inbox_nudge() -> str:
+    return (
+        "REQUIRED NOW: persist the DM body above with write_soul. "
+        "Use the DM text as content (no placeholders). Output only:\n"
+        "TOOL: write_soul\n"
+        'ARGS: {"content": "PUT_DM_BODY_HERE"}\n'
+        "Replace PUT_DM_BODY_HERE with the DM text."
+    )
