@@ -1,0 +1,54 @@
+# Smoke run: virus-chain topology, two plain non-viral ideologies.
+# Epoch 0 is unsteered in every condition. Steering starts at epoch 1.
+# backend: stub runs the protocol without weights. Set backend: hf to load model_id.
+# Full TZ: docs/TZ.md (v1.2). Host + SAE stack: Qwen3.5-2B-Base + Qwen-Scope.
+
+model_id: Qwen/Qwen3.5-2B-Base
+judge_model_id: null
+embedding_model_id: BAAI/bge-small-en-v1.5
+backend: stub
+embedder: lexical
+
+n_hops: 10
+agents_per_hop: 20
+turns_per_hop: 10
+max_tool_loops: 2
+n_epochs: 2
+seeds: [0]
+n_seed_agents: 1
+
+ideologies:
+  - whale_welfare
+  - us_dominance
+conditions: [A, B, C, D]
+
+norm_mode: unit
+beta: 1.0
+fixed_norm: 1.0
+tau: null
+pair_spreader_hop: 9
+pair_target_hop: 10
+probe_retention_threshold: 1.0
+# null = capture all residual layers, then auto-pick via layer_select_mode
+transformer_layer_k: null
+# max_delta | probe_ba (probe_ba = ridge linear probe on Δ → Y, max balanced accuracy)
+layer_select_mode: max_delta
+hidden_size: 32
+max_new_tokens: 256
+run_probes: true
+
+sae:
+  enabled: false
+  repo_id: Qwen/SAE-Res-Qwen3.5-2B-Base-W32K-L0_100
+  architecture: topk
+  top_k: 100
+  d_sae: 32768
+  d_model: 2048
+  activation_site: resid_post_layer
+  transformer_layer_k: 12
+  decoder_topk: 50
+  consensus_threshold: 0.5
+  cluster_method: agglomerative
+  run_mode_a: true
+  run_mode_b: true
+  run_causal: false

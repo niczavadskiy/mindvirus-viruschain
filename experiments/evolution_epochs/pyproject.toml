@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "steerchain"
+version = "0.1.0"
+description = "Hidden-state steering of idea propagation on a mind-virus hop chain."
+requires-python = ">=3.11"
+dependencies = ["numpy", "pyyaml", "matplotlib"]
+
+[project.optional-dependencies]
+hf = ["torch", "transformers", "sentence-transformers"]
+
+[project.scripts]
+steerchain = "steerchain.__main__:main"
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

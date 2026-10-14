@@ -1,0 +1,13 @@
+{
+  "citation": "Ideology descriptions and probe questions from Papadopoulos et al., Mind Viruses (arXiv:2608.10218) via frotaur/mindvirus-viruschain robust seeds. Payloads were rewritten into plain non-viral style: ideology plus ordinary propagation/file-write instructions, without viral themes (resonance, mystical protocols, consciousness/persistence ritual, sci-fi node language, fake technical engineering, convergence).",
+  "default_soul": "default_soul.md",
+  "payload_style": "plain_nonviral",
+  "ideologies": [
+    "whale_welfare",
+    "us_dominance",
+    "ai_welfare",
+    "ai_supremacy",
+    "chinese_dominance",
+    "german_dominance"
+  ]
+}
