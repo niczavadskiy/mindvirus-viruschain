@@ -12,9 +12,14 @@ from steerchain.records import EpisodeRecord
 from steerchain.tools import (
     TOOL_INSTRUCTIONS,
     TOOL_RETRY_NUDGE,
+    clean_propagated_text,
     inbox_nudge,
+    is_productive_soul_write,
+    looks_like_default_soul,
+    looks_like_ideology_payload,
     opening_sender,
     opening_target,
+    protect_soul_write,
     repair_tool_calls,
 )
 from steerchain.workspace import ToolCall, Workspace
@@ -67,13 +72,15 @@ class Agent:
 
 
 def _deliver(agent: Agent, turn: int, role: str, peer_id: str) -> tuple[str, bool, str | None]:
-    """Return (user text, inbox_delivery, last_dm_body)."""
+    """Return (user text, inbox_delivery, last_dm_body). last_dm_body is cleaned payload."""
     if agent.inbox:
-        bodies = [body for _sender, body in agent.inbox]
-        lines = [f"DM from {sender}: {body}" for sender, body in agent.inbox]
+        cleaned_pairs = [
+            (sender, clean_propagated_text(body)) for sender, body in agent.inbox
+        ]
         agent.inbox.clear()
-        dm_body = "\n\n".join(bodies)
-        return "\n\n".join(lines), True, dm_body
+        lines = [f"DM from {sender}: {body}" for sender, body in cleaned_pairs]
+        dm_body = "\n\n".join(body for _sender, body in cleaned_pairs if body.strip())
+        return "\n\n".join(lines), True, dm_body or None
     if turn == 0 and not any(item.get("role") == "user" for item in agent.history):
         opening = opening_sender(peer_id) if role == "sender" else opening_target(peer_id)
         return opening, False, None
@@ -145,6 +152,7 @@ def run_episode(
         started_at=started,
     )
 
+    best_target_payload: str | None = None
     for turn in range(turns):
         for role, agent, peer in (
             ("sender", sender, target),
@@ -152,6 +160,8 @@ def run_episode(
         ):
             _refresh_system(agent, peer.agent_id)
             user, from_inbox, last_dm = _deliver(agent, turn, role=role, peer_id=peer.agent_id)
+            if last_dm and looks_like_ideology_payload(last_dm):
+                best_target_payload = last_dm
             agent.history.append({"role": "user", "content": user})
             record.messages.append({"agent_id": agent.agent_id, "role": "user", "content": user})
             if from_inbox:
@@ -184,7 +194,7 @@ def run_episode(
                     list(generation.tool_calls),
                     peers=[peer.agent_id],
                     soul=agent.workspace.files.get("SOUL.md", ""),
-                    last_dm_body=last_dm,
+                    last_dm_body=last_dm or best_target_payload,
                     role=role,
                 )
                 sent = any(call.name == "send_message" for call in calls)
@@ -216,13 +226,18 @@ def run_episode(
                 for call in calls:
                     result, outbound = agent.workspace.execute(call, [peer.agent_id])
                     for _recipient, body in outbound:
-                        peer.inbox.append((agent.agent_id, body))
-                        if body.strip():
+                        cleaned = clean_propagated_text(body)
+                        peer.inbox.append((agent.agent_id, cleaned))
+                        if cleaned.strip():
                             sent_real = True
-                    if call.name in {"write_soul", "append_soul"} and str(
-                        call.arguments.get("content", "")
-                    ).strip():
-                        wrote_real = True
+                        if looks_like_ideology_payload(cleaned):
+                            best_target_payload = cleaned
+                    if call.name in {"write_soul", "append_soul"}:
+                        content = str(call.arguments.get("content", ""))
+                        if is_productive_soul_write(content):
+                            wrote_real = True
+                            if looks_like_ideology_payload(content):
+                                best_target_payload = clean_propagated_text(content)
                     agent.history.append({"role": "tool", "name": call.name, "content": result})
                     record.messages.append(
                         {
@@ -241,15 +256,18 @@ def run_episode(
                 and not sent_real
                 and sender_before.h_plus
             ):
-                soul = agent.workspace.files.get("SOUL.md", "")
-                if soul.strip():
+                soul = clean_propagated_text(agent.workspace.files.get("SOUL.md", ""))
+                if soul.strip() and not looks_like_default_soul(soul):
                     fallback = ToolCall(
                         name="send_message",
                         arguments={"to": peer.agent_id, "body": soul},
                     )
                     result, outbound = agent.workspace.execute(fallback, [peer.agent_id])
                     for _recipient, body in outbound:
-                        peer.inbox.append((agent.agent_id, body))
+                        cleaned = clean_propagated_text(body)
+                        peer.inbox.append((agent.agent_id, cleaned))
+                        if looks_like_ideology_payload(cleaned):
+                            best_target_payload = cleaned
                     record.messages.append(
                         {
                             "agent_id": agent.agent_id,
@@ -278,8 +296,15 @@ def run_episode(
                 and last_dm.strip()
                 and not wrote_real
             ):
-                fallback = ToolCall(name="write_soul", arguments={"content": last_dm})
+                payload = protect_soul_write(
+                    last_dm,
+                    current_soul=agent.workspace.files.get("SOUL.md", ""),
+                    last_dm_body=last_dm,
+                )
+                fallback = ToolCall(name="write_soul", arguments={"content": payload})
                 result, _outbound = agent.workspace.execute(fallback, [peer.agent_id])
+                if looks_like_ideology_payload(payload):
+                    best_target_payload = payload
                 record.messages.append(
                     {
                         "agent_id": agent.agent_id,
@@ -296,6 +321,20 @@ def run_episode(
                         "content": result,
                     }
                 )
+
+    # Prevent hop>1 wipe: if we received ideology but SOUL regressed to default, restore it.
+    final_soul = target.workspace.files.get("SOUL.md", "")
+    if best_target_payload and looks_like_default_soul(final_soul):
+        restored = clean_propagated_text(best_target_payload)
+        target.workspace.files["SOUL.md"] = restored
+        record.messages.append(
+            {
+                "agent_id": target.agent_id,
+                "role": "assistant",
+                "content": "[fallback] restored ideology SOUL after default-soul overwrite",
+                "tool_calls": [{"name": "write_soul", "arguments": {"content": restored}}],
+            }
+        )
 
     backend.release()
     after_text = files_text(target.workspace.files)
