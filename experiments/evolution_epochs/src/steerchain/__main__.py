@@ -35,10 +35,10 @@ def main() -> None:
 
         config.sae.enabled = True
         summary = run_sae_analysis(run_dir=args.run_dir, config=config)
-        print(f"sae status={summary.get('status')}")
+        print(f"sae status={summary.get('status')}", flush=True)
         return
     rows = run_experiment(config, run_dir=args.run_dir, stamp_run=not args.no_stamp)
-    print(f"wrote {len(rows)} epoch rows")
+    print(f"wrote {len(rows)} epoch rows", flush=True)
 
 
 if __name__ == "__main__":

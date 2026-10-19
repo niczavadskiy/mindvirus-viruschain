@@ -34,11 +34,20 @@ def run_experiment(
     if stamp_run:
         destination = stamped_run_dir(destination)
     destination.mkdir(parents=True, exist_ok=True)
+    print(f"run_dir={destination}", flush=True)
     token = apply_hf_token(config)
     data_dir = config.resolved_data_dir()
     default_soul = load_default_soul(data_dir)
     ideologies = ideologies_for(config)
+    n_jobs = len(ideologies) * len(config.conditions) * len(config.seeds)
+    print(
+        f"plan ideologies={len(ideologies)} conditions={config.conditions} "
+        f"seeds={config.seeds} epochs={config.n_epochs} hops={config.n_hops} "
+        f"agents_per_hop={config.agents_per_hop} jobs={n_jobs}",
+        flush=True,
+    )
     # One HF host for dialogues, judge, and probes (avoids loading the model twice).
+    print("loading backend/detector…", flush=True)
     shared_backend = build_backend(config, default_soul) if config.backend == "hf" else None
     detector = build_detector(
         config,
@@ -46,10 +55,17 @@ def run_experiment(
         default_soul,
         complete_fn=None if shared_backend is None else shared_backend.complete,
     )
+    print("backend ready", flush=True)
     rows: list[dict] = []
+    job = 0
     for ideology in ideologies:
         for condition in config.conditions:
             for seed in config.seeds:
+                job += 1
+                print(
+                    f"job {job}/{n_jobs}: {ideology.ideology_id}/{condition}/seed_{seed}",
+                    flush=True,
+                )
                 backend = shared_backend if shared_backend is not None else build_backend(config, default_soul)
                 backend.release()
                 if hasattr(backend, "steer_log"):

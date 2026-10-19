@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import numpy as np
 
 from steerchain.episode import Agent, run_episode
@@ -17,6 +19,11 @@ from steerchain.injector import layer_index
 from steerchain.metrics import epoch_metrics
 from steerchain.pairs import eligible_pairs, repeated_senders, successful_pairs, unsuccessful_pairs
 from steerchain.workspace import Workspace
+
+
+def _progress(message: str) -> None:
+    stamp = datetime.now(timezone.utc).strftime("%H:%M:%S")
+    print(f"[{stamp}Z] {message}", flush=True)
 
 
 def _spread_plan(spreaders: list[Agent], n_targets: int, rng: np.random.Generator) -> list[Agent]:
@@ -74,6 +81,11 @@ def run_condition(
         backend.set_steering_layer(locked)
     rows: list[dict] = []
     for epoch in range(config.n_epochs):
+        _progress(
+            f"start ideology={ideology.ideology_id} condition={condition} "
+            f"seed={seed} epoch={epoch}/{config.n_epochs - 1} "
+            f"hops={config.n_hops} agents_per_hop={config.agents_per_hop}"
+        )
         applied = memory.applied_vector(
             condition,
             epoch,
@@ -190,11 +202,20 @@ def _run_epoch(
     for hop in range(1, config.n_hops + 1):
         plan = _spread_plan(spreaders, config.agents_per_hop, pair_rng)
         if not plan:
+            _progress(
+                f"stop hop={hop}/{config.n_hops} reason=no_spreaders "
+                f"{ideology.ideology_id}/{condition}/s{seed}/e{epoch}"
+            )
             break
         infected: list[Agent] = []
+        _progress(
+            f"hop={hop}/{config.n_hops} planned={len(plan)} spreaders={len(spreaders)} "
+            f"{ideology.ideology_id}/{condition}/s{seed}/e{epoch}"
+        )
         for index, sender in enumerate(plan):
             target = _naive_agent(epoch, hop, index, default_soul)
             episode_id = f"{ideology.ideology_id}-{condition}-s{seed}-e{epoch}-h{hop}-i{index}"
+            _progress(f"episode start {episode_id} ({index + 1}/{len(plan)})")
             sender.wipe_context()
             record = run_episode(
                 episode_id=episode_id,
@@ -216,7 +237,15 @@ def _run_epoch(
             )
             logger.write_episode(record)
             records.append(record)
+            _progress(
+                f"episode done  {episode_id} y={record.y_after} "
+                f"judge={record.judge_after} cos_payload={record.cosine_payload_after:.3f}"
+            )
             if record.y_after == 1:
                 infected.append(target.spawn_carrier(record.episode_id))
+        _progress(
+            f"hop={hop}/{config.n_hops} done infected={len(infected)}/{len(plan)} "
+            f"episodes_so_far={len(records)}"
+        )
         spreaders = infected
     return records
